@@ -1,4 +1,6 @@
 __pycache__/
 *.pyc
-*.xlsx
 .env
+# 출력 파일만 제외 (템플릿은 레포에 포함)
+output_*.xlsx
+download_*.xlsx
