@@ -271,6 +271,7 @@ def _fix_group_borders(ws, dl_rows: list, data_start_row: int):
     no_side  = Side(border_style=None)
 
     n = len(dl_rows)
+    max_col = ws.max_column
 
     # 그룹 시작/끝 행 번호 수집
     group_starts: set[int] = set()
@@ -297,12 +298,17 @@ def _fix_group_borders(ws, dl_rows: list, data_start_row: int):
         is_start = row in group_starts and row != first_row  # 첫 그룹엔 top 없음
         is_end   = row in group_ends
 
-        for col in range(1, COL_ACTUAL + 1):
+        for col in range(1, max_col + 1):
             cell = ws.cell(row=row, column=col)
             b    = cell.border
 
-            want_top    = thin    if (is_start and col in TOP_COLS)    else no_side
-            want_bottom = thin    if (is_end   and col in BOTTOM_COLS) else no_side
+            if col > COL_ACTUAL:
+                # 간트 차트 영역: 그룹 끝 행에만 bottom 선 적용
+                want_top    = no_side
+                want_bottom = thin if is_end else no_side
+            else:
+                want_top    = thin if (is_start and col in TOP_COLS)    else no_side
+                want_bottom = thin if (is_end   and col in BOTTOM_COLS) else no_side
 
             # 기존 left/right 유지하면서 top/bottom만 교체
             cell.border = Border(
