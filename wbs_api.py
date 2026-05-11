@@ -22,6 +22,7 @@ from wbs_mapper import (
     fill_template,
     load_download_rows,
     unmerge_ab_data_area,
+    update_holiday_sheet,
 )
 
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "original_wbs.xlsx")
@@ -114,8 +115,17 @@ async def map_wbs(
             ws.cell(row=1, column=1).value = project
         ws.cell(row=2, column=1).value = f"▥ Last update : {_dt.today().strftime('%Y-%m-%d')}"
 
+        # 공휴일 시트 자동 업데이트
+        from datetime import datetime as _dt2
+        dates = [r[k] for r in dl_rows for k in ("시작일", "종료일") if isinstance(r.get(k), _dt2)]
+        if dates:
+            sy, ey = min(d.year for d in dates), max(d.year for d in dates)
+        else:
+            sy = ey = _dt2.today().year
+        holiday_ref = update_holiday_sheet(wb, sy, ey)
+
         unmerge_ab_data_area(ws, TEMPLATE_DATA_START_ROW)
-        fill_template(ws, dl_rows, TEMPLATE_DATA_START_ROW, gubun_fills)
+        fill_template(ws, dl_rows, TEMPLATE_DATA_START_ROW, gubun_fills, holiday_ref)
 
         last_data_row = TEMPLATE_DATA_START_ROW + len(dl_rows) - 1
         if ws.max_row > last_data_row:

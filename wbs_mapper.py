@@ -106,6 +106,35 @@ def copy_previous_version_sheets(wb_target, prev_path: str, current_version: str
             ws_dst.merge_cells(str(merged_range))
 
 
+def update_holiday_sheet(wb, start_year: int, end_year: int) -> str:
+    """공휴일 시트를 해당 연도 한국 공휴일로 갱신하고 수식 참조 범위 반환"""
+    import holidays as _holidays
+
+    if "공휴일" not in wb.sheetnames:
+        return HOLIDAY_REF
+
+    ws = wb["공휴일"]
+
+    # 기존 데이터 클리어 (B4~)
+    for row in range(4, ws.max_row + 1):
+        ws.cell(row=row, column=1).value = None
+        ws.cell(row=row, column=2).value = None
+
+    # 연도 범위 공휴일 수집 및 정렬
+    all_holidays: list[tuple[str, datetime]] = []
+    for year in range(start_year, end_year + 1):
+        for date, name in sorted(_holidays.KR(years=year).items()):
+            all_holidays.append((name, datetime(date.year, date.month, date.day)))
+    all_holidays.sort(key=lambda x: x[1])
+
+    for i, (name, dt) in enumerate(all_holidays):
+        ws.cell(row=4 + i, column=1).value = name
+        ws.cell(row=4 + i, column=2).value = dt
+
+    end_row = 3 + len(all_holidays)
+    return f"공휴일!$B$4:$B${end_row}"
+
+
 def load_download_rows(path: str) -> list:
     wb = openpyxl.load_workbook(path)
     ws = wb.active
@@ -143,7 +172,7 @@ def write_formula(ws, row: int, col: int, formula: str):
     ws.cell(row=row, column=col).value = formula
 
 
-def fill_template(ws, dl_rows: list, data_start_row: int, gubun_fills: dict):
+def fill_template(ws, dl_rows: list, data_start_row: int, gubun_fills: dict, holiday_ref: str = HOLIDAY_REF):
     template_last = ws.max_row
 
     for i, r in enumerate(dl_rows):
@@ -163,7 +192,7 @@ def fill_template(ws, dl_rows: list, data_start_row: int, gubun_fills: dict):
 
         # 수식: 기간, 날짜기준 진척률
         write_formula(ws, out_row, COL_DAYS,
-            f"=NETWORKDAYS.INTL(E{out_row},F{out_row},1,{HOLIDAY_REF})")
+            f"=NETWORKDAYS.INTL(E{out_row},F{out_row},1,{holiday_ref})")
         write_formula(ws, out_row, COL_DATE_PR,
             f'=IFERROR(MIN(1,(DATEDIF(E{out_row},TODAY(),"d")+1)'
             f'/(DATEDIF(E{out_row},F{out_row},"d")+1)),0)')
@@ -457,8 +486,17 @@ def main():
         ws.cell(row=1, column=1).value = project
     ws.cell(row=2, column=1).value = f"▥ Last update : {datetime.today().strftime('%Y-%m-%d')}"
 
+    # 공휴일 시트 자동 업데이트
+    dates = [r[k] for r in dl_rows for k in ("시작일", "종료일") if isinstance(r.get(k), datetime)]
+    if dates:
+        sy, ey = min(d.year for d in dates), max(d.year for d in dates)
+    else:
+        sy = ey = datetime.today().year
+    holiday_ref = update_holiday_sheet(wb, sy, ey)
+    print(f"      공휴일 업데이트: {sy}~{ey}년 → 참조범위 {holiday_ref}")
+
     unmerge_ab_data_area(ws, TEMPLATE_DATA_START_ROW)
-    fill_template(ws, dl_rows, TEMPLATE_DATA_START_ROW, gubun_fills)
+    fill_template(ws, dl_rows, TEMPLATE_DATA_START_ROW, gubun_fills, holiday_ref)
 
     # 데이터 이후 빈 행 삭제
     last_data_row = TEMPLATE_DATA_START_ROW + len(dl_rows) - 1
