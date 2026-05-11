@@ -2,7 +2,12 @@ import { useRef, useState } from "react";
 
 const API_URL = import.meta.env.VITE_WBS_API_URL ?? "http://localhost:8000";
 
-export default function WbsMapper() {
+interface Props {
+  version?: string;
+  projectName?: string;
+}
+
+export default function WbsMapper({ version, projectName }: Props) {
   const [downloadFile, setDownloadFile] = useState<File | null>(null);
   const [templateFile, setTemplateFile] = useState<File | null>(null);
   const [previousFile, setPreviousFile] = useState<File | null>(null);
@@ -25,7 +30,11 @@ export default function WbsMapper() {
       body.append("template", templateFile);
       if (previousFile) body.append("previous", previousFile);
 
-      const res = await fetch(`${API_URL}/map-wbs`, { method: "POST", body });
+      const params = new URLSearchParams();
+      if (version) params.set("version", version);
+      if (projectName) params.set("project", projectName);
+      const qs = params.toString();
+      const res = await fetch(`${API_URL}/map-wbs${qs ? "?" + qs : ""}`, { method: "POST", body });
 
       if (!res.ok) {
         const msg = await res.json().catch(() => ({ detail: res.statusText }));

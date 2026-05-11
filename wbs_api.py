@@ -19,7 +19,6 @@ from wbs_mapper import (
     COL_GUBUN,
     TEMPLATE_DATA_START_ROW,
     copy_previous_version_sheets,
-    extract_header_info,
     fill_template,
     load_download_rows,
     unmerge_ab_data_area,
@@ -46,6 +45,8 @@ def health():
 async def map_wbs(
     download: UploadFile = File(..., description="Lovable에서 다운받은 WBS xlsx"),
     previous: UploadFile | None = File(None, description="이전 출력 WBS (버전 히스토리용, 선택)"),
+    version: str | None = Query(None, description="WBS 버전 (예: v2)"),
+    project: str | None = Query(None, description="프로젝트명"),
     sheet: str = Query(default="V1.4", description="템플릿 시트 이름"),
 ):
     if not download.filename.endswith(".xlsx"):
@@ -87,8 +88,6 @@ async def map_wbs(
             val = ws_orig.cell(row, COL_GUBUN).value
             if val and val not in gubun_fills:
                 gubun_fills[val] = copy.copy(ws_orig.cell(row, COL_GUBUN).fill)
-
-        project, version = extract_header_info(dl_path)
 
         shutil.copy2(tpl_path, out_path)
         wb = openpyxl.load_workbook(out_path)
