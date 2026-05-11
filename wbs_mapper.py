@@ -66,6 +66,37 @@ def _is_version_sheet(name: str) -> bool:
     return bool(re.match(r'^[vV]\d', name.strip()))
 
 
+def copy_previous_version_sheets(wb_target, prev_path: str, current_version: str | None):
+    """이전 출력의 버전 시트들을 현재 workbook에 hidden으로 복사 (현재 버전 및 중복 제외)"""
+    import copy
+    wb_prev = openpyxl.load_workbook(prev_path)
+    for name in wb_prev.sheetnames:
+        if not _is_version_sheet(name):
+            continue
+        if name == current_version:
+            continue
+        if name in wb_target.sheetnames:
+            continue
+        ws_src = wb_prev[name]
+        ws_dst = wb_target.create_sheet(title=name)
+        ws_dst.sheet_state = "hidden"
+        for row in ws_src.iter_rows():
+            for cell in row:
+                dst_cell = ws_dst.cell(row=cell.row, column=cell.column, value=cell.value)
+                if cell.has_style:
+                    dst_cell.font      = copy.copy(cell.font)
+                    dst_cell.fill      = copy.copy(cell.fill)
+                    dst_cell.border    = copy.copy(cell.border)
+                    dst_cell.alignment = copy.copy(cell.alignment)
+                    dst_cell.number_format = cell.number_format
+        for col, cd in ws_src.column_dimensions.items():
+            ws_dst.column_dimensions[col].width = cd.width
+        for row_num, rd in ws_src.row_dimensions.items():
+            ws_dst.row_dimensions[row_num].height = rd.height
+        for merged_range in ws_src.merged_cells.ranges:
+            ws_dst.merge_cells(str(merged_range))
+
+
 def load_download_rows(path: str) -> list:
     wb = openpyxl.load_workbook(path)
     ws = wb.active
@@ -353,10 +384,11 @@ def _copy_row_style(ws, src_row: int, dst_row: int):
 
 def main():
     parser = argparse.ArgumentParser(description="WBS 매핑 스크립트")
-    parser.add_argument("--download", required=True, help="다운로드된 WBS 파일 경로")
-    parser.add_argument("--template", required=True, help="원본 WBS 템플릿 파일 경로")
-    parser.add_argument("--output",   required=True, help="출력 파일 경로")
-    parser.add_argument("--sheet",    default="V1.4", help="사용할 템플릿 시트 이름 (기본: V1.4)")
+    parser.add_argument("--download",  required=True, help="다운로드된 WBS 파일 경로")
+    parser.add_argument("--template",  required=True, help="원본 WBS 템플릿 파일 경로")
+    parser.add_argument("--output",    required=True, help="출력 파일 경로")
+    parser.add_argument("--sheet",     default="V1.4", help="사용할 템플릿 시트 이름 (기본: V1.4)")
+    parser.add_argument("--previous",  default=None,  help="이전 출력 WBS 파일 경로 (버전 히스토리 포함)")
     args = parser.parse_args()
 
     print(f"[1/4] 다운로드 WBS 읽기: {args.download}")
@@ -380,6 +412,12 @@ def main():
     print(f"[3/4] 데이터 매핑 (시트: {args.sheet})")
     wb = openpyxl.load_workbook(args.output)
 
+    # 이전 출력의 버전 시트 복사 (히스토리 누적)
+    version = extract_version(args.download)
+    if args.previous:
+        print(f"      이전 출력에서 버전 시트 복사: {args.previous}")
+        copy_previous_version_sheets(wb, args.previous, version)
+
     # 히든 시트 삭제 (공휴일·버전 패턴 시트는 보존)
     hidden_sheets = [
         name for name in wb.sheetnames
@@ -401,7 +439,6 @@ def main():
     ws = wb[sheet_name]
 
     # 버전 시트 생성: 다운로드 WBS 상단에서 버전 읽어 새 시트로 복사, 기존 시트는 hidden
-    version = extract_version(args.download)
     if version and version != sheet_name:
         print(f"      버전 시트 생성: {sheet_name} → {version}")
         new_ws = wb.copy_worksheet(ws)

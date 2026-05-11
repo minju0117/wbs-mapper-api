@@ -19,6 +19,7 @@ from wbs_mapper import (
     COL_GUBUN,
     TEMPLATE_DATA_START_ROW,
     _is_version_sheet,
+    copy_previous_version_sheets,
     extract_version,
     fill_template,
     load_download_rows,
@@ -45,6 +46,7 @@ def health():
 @app.post("/map-wbs")
 async def map_wbs(
     download: UploadFile = File(..., description="Lovable에서 다운받은 WBS xlsx"),
+    previous: UploadFile | None = File(None, description="이전 출력 WBS (버전 히스토리용, 선택)"),
     sheet: str = Query(default="V1.4", description="템플릿 시트 이름"),
 ):
     if not download.filename.endswith(".xlsx"):
@@ -60,6 +62,12 @@ async def map_wbs(
 
         with open(dl_path, "wb") as f:
             f.write(await download.read())
+
+        prev_path = None
+        if previous:
+            prev_path = os.path.join(tmpdir, "previous.xlsx")
+            with open(prev_path, "wb") as f:
+                f.write(await previous.read())
 
         shutil.copy2(TEMPLATE_PATH, tpl_path)
 
@@ -84,6 +92,11 @@ async def map_wbs(
         shutil.copy2(tpl_path, out_path)
         wb = openpyxl.load_workbook(out_path)
 
+        # 이전 출력의 버전 시트 복사 (히스토리 누적)
+        version = extract_version(dl_path)
+        if prev_path:
+            copy_previous_version_sheets(wb, prev_path, version)
+
         # 히든 시트 삭제 (공휴일·버전 패턴 시트는 보존)
         for name in [
             n for n in wb.sheetnames
@@ -96,7 +109,6 @@ async def map_wbs(
         ws = wb[sheet_name if sheet_name in wb.sheetnames else wb.sheetnames[0]]
 
         # 버전 시트 생성: 다운로드 WBS 상단에서 버전 읽어 새 시트로 복사, 기존 시트는 hidden
-        version = extract_version(dl_path)
         if version and version != sheet_name:
             new_ws = wb.copy_worksheet(ws)
             new_ws.title = version
