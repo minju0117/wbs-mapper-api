@@ -18,6 +18,8 @@ from fastapi.responses import StreamingResponse
 from wbs_mapper import (
     COL_GUBUN,
     TEMPLATE_DATA_START_ROW,
+    _is_version_sheet,
+    extract_version,
     fill_template,
     load_download_rows,
     unmerge_ab_data_area,
@@ -82,11 +84,24 @@ async def map_wbs(
         shutil.copy2(tpl_path, out_path)
         wb = openpyxl.load_workbook(out_path)
 
-        # 히든 시트 삭제 (대상 시트 제외)
-        for name in [n for n in wb.sheetnames if wb[n].sheet_state in ("hidden", "veryHidden") and n != sheet_name]:
+        # 히든 시트 삭제 (공휴일·버전 패턴 시트는 보존)
+        for name in [
+            n for n in wb.sheetnames
+            if wb[n].sheet_state in ("hidden", "veryHidden")
+            and n != "공휴일"
+            and not _is_version_sheet(n)
+        ]:
             del wb[name]
 
         ws = wb[sheet_name if sheet_name in wb.sheetnames else wb.sheetnames[0]]
+
+        # 버전 시트 생성: 다운로드 WBS 상단에서 버전 읽어 새 시트로 복사, 기존 시트는 hidden
+        version = extract_version(dl_path)
+        if version and version != sheet_name:
+            new_ws = wb.copy_worksheet(ws)
+            new_ws.title = version
+            ws.sheet_state = "hidden"
+            ws = new_ws
 
         unmerge_ab_data_area(ws, TEMPLATE_DATA_START_ROW)
         fill_template(ws, dl_rows, TEMPLATE_DATA_START_ROW, gubun_fills)

@@ -11,6 +11,7 @@ WBS 매핑 스크립트
 """
 
 import argparse
+import re
 import shutil
 from datetime import datetime
 
@@ -46,6 +47,23 @@ def parse_date(val):
         except ValueError:
             continue
     return val  # 변환 실패 시 원본 반환
+
+
+def extract_version(path: str) -> str | None:
+    """다운로드 WBS 상단 좌측에서 버전 문자열 추출 (예: v2, V1.4)"""
+    wb = openpyxl.load_workbook(path)
+    ws = wb.active
+    for row in range(1, 6):
+        val = ws.cell(row=row, column=1).value
+        if val:
+            m = re.search(r'[vV]\d[\d.]*', str(val))
+            if m:
+                return m.group(0)
+    return None
+
+
+def _is_version_sheet(name: str) -> bool:
+    return bool(re.match(r'^[vV]\d', name.strip()))
 
 
 def load_download_rows(path: str) -> list:
@@ -362,10 +380,12 @@ def main():
     print(f"[3/4] 데이터 매핑 (시트: {args.sheet})")
     wb = openpyxl.load_workbook(args.output)
 
-    # 히든 시트 삭제 (대상 시트 제외)
+    # 히든 시트 삭제 (공휴일·버전 패턴 시트는 보존)
     hidden_sheets = [
         name for name in wb.sheetnames
-        if wb[name].sheet_state in ("hidden", "veryHidden") and name != args.sheet
+        if wb[name].sheet_state in ("hidden", "veryHidden")
+        and name != "공휴일"
+        and not _is_version_sheet(name)
     ]
     for name in hidden_sheets:
         del wb[name]
@@ -379,6 +399,16 @@ def main():
         sheet_name = args.sheet
 
     ws = wb[sheet_name]
+
+    # 버전 시트 생성: 다운로드 WBS 상단에서 버전 읽어 새 시트로 복사, 기존 시트는 hidden
+    version = extract_version(args.download)
+    if version and version != sheet_name:
+        print(f"      버전 시트 생성: {sheet_name} → {version}")
+        new_ws = wb.copy_worksheet(ws)
+        new_ws.title = version
+        ws.sheet_state = "hidden"
+        ws = new_ws
+
     unmerge_ab_data_area(ws, TEMPLATE_DATA_START_ROW)
     fill_template(ws, dl_rows, TEMPLATE_DATA_START_ROW, gubun_fills)
 
