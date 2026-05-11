@@ -362,6 +362,16 @@ def main():
     print(f"[3/4] 데이터 매핑 (시트: {args.sheet})")
     wb = openpyxl.load_workbook(args.output)
 
+    # 히든 시트 삭제 (대상 시트 제외)
+    hidden_sheets = [
+        name for name in wb.sheetnames
+        if wb[name].sheet_state in ("hidden", "veryHidden") and name != args.sheet
+    ]
+    for name in hidden_sheets:
+        del wb[name]
+    if hidden_sheets:
+        print(f"      히든 시트 삭제: {hidden_sheets}")
+
     if args.sheet not in wb.sheetnames:
         print(f"      경고: '{args.sheet}' 시트 없음. 사용 가능: {wb.sheetnames}")
         sheet_name = wb.sheetnames[0]

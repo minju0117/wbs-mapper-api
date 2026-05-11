@@ -81,6 +81,11 @@ async def map_wbs(
 
         shutil.copy2(tpl_path, out_path)
         wb = openpyxl.load_workbook(out_path)
+
+        # 히든 시트 삭제 (대상 시트 제외)
+        for name in [n for n in wb.sheetnames if wb[n].sheet_state in ("hidden", "veryHidden") and n != sheet_name]:
+            del wb[name]
+
         ws = wb[sheet_name if sheet_name in wb.sheetnames else wb.sheetnames[0]]
 
         unmerge_ab_data_area(ws, TEMPLATE_DATA_START_ROW)
