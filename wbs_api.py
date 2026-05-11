@@ -18,9 +18,8 @@ from fastapi.responses import StreamingResponse
 from wbs_mapper import (
     COL_GUBUN,
     TEMPLATE_DATA_START_ROW,
-    _is_version_sheet,
     copy_previous_version_sheets,
-    extract_version,
+    extract_header_info,
     fill_template,
     load_download_rows,
     unmerge_ab_data_area,
@@ -89,31 +88,32 @@ async def map_wbs(
             if val and val not in gubun_fills:
                 gubun_fills[val] = copy.copy(ws_orig.cell(row, COL_GUBUN).fill)
 
+        project, version = extract_header_info(dl_path)
+
         shutil.copy2(tpl_path, out_path)
         wb = openpyxl.load_workbook(out_path)
 
-        # 이전 출력의 버전 시트 복사 (히스토리 누적)
-        version = extract_version(dl_path)
-        if prev_path:
-            copy_previous_version_sheets(wb, prev_path, version)
-
-        # 히든 시트 삭제 (공휴일·버전 패턴 시트는 보존)
+        # ① 히든 시트 전부 삭제 (공휴일만 보존)
         for name in [
             n for n in wb.sheetnames
-            if wb[n].sheet_state in ("hidden", "veryHidden")
-            and n != "공휴일"
-            and not _is_version_sheet(n)
+            if wb[n].sheet_state in ("hidden", "veryHidden") and n != "공휴일"
         ]:
             del wb[name]
 
-        ws = wb[sheet_name if sheet_name in wb.sheetnames else wb.sheetnames[0]]
+        # ② 이전 출력의 버전 시트를 hidden으로 복사 (삭제 이후에 추가)
+        if prev_path:
+            copy_previous_version_sheets(wb, prev_path, version)
 
-        # 버전 시트 생성: 다운로드 WBS 상단에서 버전 읽어 새 시트로 복사, 기존 시트는 hidden
-        if version and version != sheet_name:
-            new_ws = wb.copy_worksheet(ws)
-            new_ws.title = version
-            ws.sheet_state = "hidden"
-            ws = new_ws
+        # ③ 작업 시트 선택 및 시트명 버전으로 변경
+        ws = wb[sheet_name if sheet_name in wb.sheetnames else wb.sheetnames[0]]
+        if version:
+            ws.title = version
+
+        # ④ 프로젝트명(A1), Last update(A2) 갱신
+        from datetime import datetime as _dt
+        if project:
+            ws.cell(row=1, column=1).value = project
+        ws.cell(row=2, column=1).value = f"▥ Last update : {_dt.today().strftime('%Y-%m-%d')}"
 
         unmerge_ab_data_area(ws, TEMPLATE_DATA_START_ROW)
         fill_template(ws, dl_rows, TEMPLATE_DATA_START_ROW, gubun_fills)

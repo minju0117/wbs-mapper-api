@@ -49,17 +49,26 @@ def parse_date(val):
     return val  # 변환 실패 시 원본 반환
 
 
-def extract_version(path: str) -> str | None:
-    """다운로드 WBS 상단 좌측에서 버전 문자열 추출 (예: v2, V1.4)"""
+def extract_header_info(path: str) -> tuple[str | None, str | None]:
+    """다운로드 WBS 상단에서 (프로젝트명, 버전) 추출.
+    버전(v1, v2...) 이 있는 행의 바로 위 행을 프로젝트명으로 간주.
+    """
     wb = openpyxl.load_workbook(path)
     ws = wb.active
-    for row in range(1, 6):
+    version, project, version_row = None, None, None
+    for row in range(1, 10):
         val = ws.cell(row=row, column=1).value
         if val:
             m = re.search(r'[vV]\d[\d.]*', str(val))
             if m:
-                return m.group(0)
-    return None
+                version = m.group(0)
+                version_row = row
+                break
+    if version_row and version_row > 1:
+        proj_val = ws.cell(row=version_row - 1, column=1).value
+        if proj_val:
+            project = str(proj_val).strip()
+    return project, version
 
 
 def _is_version_sheet(name: str) -> bool:
@@ -409,42 +418,44 @@ def main():
     print(f"[2/4] 템플릿 복사: {args.template} → {args.output}")
     shutil.copy2(args.template, args.output)
 
+    project, version = extract_header_info(args.download)
+    print(f"      프로젝트명: {project}, 버전: {version}")
+
     print(f"[3/4] 데이터 매핑 (시트: {args.sheet})")
     wb = openpyxl.load_workbook(args.output)
 
-    # 이전 출력의 버전 시트 복사 (히스토리 누적)
-    version = extract_version(args.download)
-    if args.previous:
-        print(f"      이전 출력에서 버전 시트 복사: {args.previous}")
-        copy_previous_version_sheets(wb, args.previous, version)
-
-    # 히든 시트 삭제 (공휴일·버전 패턴 시트는 보존)
+    # ① 히든 시트 전부 삭제 (공휴일만 보존)
     hidden_sheets = [
         name for name in wb.sheetnames
-        if wb[name].sheet_state in ("hidden", "veryHidden")
-        and name != "공휴일"
-        and not _is_version_sheet(name)
+        if wb[name].sheet_state in ("hidden", "veryHidden") and name != "공휴일"
     ]
     for name in hidden_sheets:
         del wb[name]
     if hidden_sheets:
         print(f"      히든 시트 삭제: {hidden_sheets}")
 
+    # ② 이전 출력의 버전 시트를 hidden으로 복사 (삭제 이후에 추가)
+    if args.previous:
+        print(f"      이전 출력에서 버전 시트 복사: {args.previous}")
+        copy_previous_version_sheets(wb, args.previous, version)
+
+    # ③ 작업 시트 선택
     if args.sheet not in wb.sheetnames:
         print(f"      경고: '{args.sheet}' 시트 없음. 사용 가능: {wb.sheetnames}")
         sheet_name = wb.sheetnames[0]
     else:
         sheet_name = args.sheet
-
     ws = wb[sheet_name]
 
-    # 버전 시트 생성: 다운로드 WBS 상단에서 버전 읽어 새 시트로 복사, 기존 시트는 hidden
-    if version and version != sheet_name:
-        print(f"      버전 시트 생성: {sheet_name} → {version}")
-        new_ws = wb.copy_worksheet(ws)
-        new_ws.title = version
-        ws.sheet_state = "hidden"
-        ws = new_ws
+    # ④ 시트명을 버전으로 변경
+    if version:
+        ws.title = version
+        print(f"      시트명 변경: {sheet_name} → {version}")
+
+    # ⑤ 프로젝트명(A1), Last update(A2) 갱신
+    if project:
+        ws.cell(row=1, column=1).value = project
+    ws.cell(row=2, column=1).value = f"▥ Last update : {datetime.today().strftime('%Y-%m-%d')}"
 
     unmerge_ab_data_area(ws, TEMPLATE_DATA_START_ROW)
     fill_template(ws, dl_rows, TEMPLATE_DATA_START_ROW, gubun_fills)
