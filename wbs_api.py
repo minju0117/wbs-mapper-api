@@ -59,6 +59,16 @@ class ScheduleRequest(BaseModel):
     menus: List[MenuInfo] = []
 
 
+class AdjustRequest(BaseModel):
+    project: str
+    client: str
+    start_date: str
+    end_date: str
+    first_launch_date: Optional[str] = None
+    conditions: Optional[str] = None
+    tasks: List[dict] = []
+
+
 SCHEDULE_SYSTEM_PROMPT = """당신은 한국 웹 에이전시 "더위버"의 WBS 일정 전문가입니다.
 6개 실제 프로젝트(DB그룹, DB하이텍, 효성그룹, 대상웰라이프, 삼양그룹, 삼화페인트)를 분석한 패턴 기반으로 일정을 생성합니다.
 
@@ -154,9 +164,107 @@ JSON 배열만 출력. 다른 텍스트 없이. 7개 필드만 포함:
 공백 최소화."""
 
 
+ADJUST_SYSTEM_PROMPT = """당신은 한국 웹 에이전시 "더위버"의 WBS 일정 조정 전문가입니다.
+사용자가 직접 수정한 태스크(locked=true)를 기준점으로 삼아, 나머지 태스크(locked=false)의 일정을 재조정합니다.
+
+## 핵심 규칙
+1. locked=true 태스크: startDate/endDate/duration 절대 변경 금지. subTask/owner/category/task도 유지.
+2. locked=false 태스크: 의존관계를 지키며 startDate/endDate/duration 조정 가능.
+3. 업무 의존관계 (반드시 준수):
+   - 화면설계는 IA설계 완료 후에만 시작 가능
+   - 페이지 디자인은 해당 메뉴 화면설계 완료 후 시작
+   - 퍼블리싱은 해당 메뉴 디자인 완료 후 시작
+   - 개발은 퍼블리싱 완료 후 시작
+   - 고객사 검수는 기능검수 완료 후 시작
+   - 통합테스트는 고객사 검수 완료 후 시작
+4. locked 태스크가 의존관계를 깬 경우, 그 이후 태스크를 순차 밀어서 조정.
+5. locked 태스크가 의존관계상 앞 태스크를 당긴 경우, 앞 태스크도 당겨서 조정 가능.
+6. 주말(토/일) 제외. duration은 영업일 기준.
+
+## 담당 표기
+- 더위버 단독: "더위버"
+- 고객사 단독: "{입력된 고객사명}"
+- 협업: "{입력된 고객사명}/더위버"
+
+## 출력 형식
+입력받은 tasks 배열 전체를 그대로 반환. locked=true 항목도 원본 그대로 포함.
+7개 필드만: category, task, subTask, owner, startDate(YYYY-MM-DD), endDate(YYYY-MM-DD), duration
+JSON 배열만 출력. 다른 텍스트 없이. 공백 최소화."""
+
+
 @app.get("/")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/adjust-schedule")
+async def adjust_schedule(request: AdjustRequest):
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.")
+
+    if not request.tasks:
+        raise HTTPException(status_code=400, detail="tasks 배열이 비어 있습니다.")
+
+    locked_count = sum(1 for t in request.tasks if t.get("locked"))
+    tasks_json = json.dumps(request.tasks, ensure_ascii=False, separators=(",", ":"))
+
+    user_message = f"""다음 WBS 일정을 조정해주세요.
+
+프로젝트명: {request.project}
+고객사: {request.client}
+시작일: {request.start_date}
+종료일: {request.end_date}
+1차 오픈일: {request.first_launch_date or '없음'}
+조정 지시사항: {request.conditions or '없음'}
+
+현재 tasks (locked=true는 수정 불가, locked=false는 조정 대상):
+{tasks_json}
+
+locked=true 항목은 {locked_count}개입니다. 이 항목들을 기준점으로 나머지 일정을 재조정해주세요."""
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=8096,
+            system=ADJUST_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        raw = message.content[0].text.strip()
+
+        if "```" in raw:
+            parts = raw.split("```")
+            for part in parts:
+                part = part.strip()
+                if part.startswith("json"):
+                    part = part[4:].strip()
+                if part.startswith("["):
+                    raw = part
+                    break
+
+        start = raw.find("[")
+        end = raw.rfind("]")
+        if start != -1 and end != -1 and end > start:
+            raw = raw[start:end + 1]
+
+        tasks = json.loads(raw)
+
+        for t in tasks:
+            t.setdefault("scheduledProgress", 0)
+            t.setdefault("actualProgress", 0)
+            t.setdefault("progress", 0)
+            t.setdefault("locked", False)
+            t.setdefault("isCompleted", False)
+            t.setdefault("delayReason", "")
+
+    except json.JSONDecodeError as e:
+        preview = raw[:300] if 'raw' in dir() else "N/A"
+        raise HTTPException(status_code=500, detail=f"Claude 응답 파싱 오류: {e} | 응답 앞부분: {preview}")
+    except anthropic.APIError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API 오류: {e}")
+
+    return {"tasks": tasks}
 
 
 @app.post("/generate-schedule")
