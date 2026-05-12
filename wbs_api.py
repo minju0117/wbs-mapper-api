@@ -19,6 +19,7 @@ from wbs_mapper import (
     COL_GUBUN,
     TEMPLATE_DATA_START_ROW,
     copy_previous_version_sheets,
+    extract_header_info,
     fill_template,
     load_download_rows,
     unmerge_ab_data_area,
@@ -76,6 +77,14 @@ async def map_wbs(
             dl_rows = load_download_rows(dl_path)
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"다운로드 WBS 파싱 오류: {e}")
+
+        # query param 미전달 시 다운로드 WBS 상단에서 자동 추출
+        if not project or not version:
+            extracted_project, extracted_version = extract_header_info(dl_path)
+            if not project:
+                project = extracted_project
+            if not version:
+                version = extracted_version
 
         if not dl_rows:
             raise HTTPException(status_code=422, detail="다운로드 WBS에 데이터가 없습니다.")
