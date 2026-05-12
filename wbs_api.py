@@ -142,18 +142,22 @@ SCHEDULE_SYSTEM_PROMPT = """당신은 한국 웹 에이전시 "더위버"의 WBS
 - 1차 오픈일이 있으면 1차 메뉴를 먼저 배치하고 2차를 이후에 배치
 
 ## 출력 형식
-JSON 배열만 출력. 다른 텍스트 없이:
+JSON 배열만 출력. 다른 텍스트 없이. 필드명은 반드시 아래 영문 camelCase 사용:
 [
   {
-    "구분": "착수",
-    "업무": "기획",
-    "세부항목": "킥오프",
-    "담당": "{고객사명}/더위버",
-    "시작일": "YYYY-MM-DD",
-    "종료일": "YYYY-MM-DD",
-    "기간": 1,
-    "계획": 0,
-    "진척": 0
+    "category": "착수",
+    "task": "기획",
+    "subTask": "킥오프",
+    "owner": "{고객사명}/더위버",
+    "startDate": "YYYY-MM-DD",
+    "endDate": "YYYY-MM-DD",
+    "duration": 1,
+    "scheduledProgress": 0,
+    "actualProgress": 0,
+    "progress": 0,
+    "locked": false,
+    "isCompleted": false,
+    "delayReason": ""
   }
 ]"""
 
