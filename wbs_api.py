@@ -6,14 +6,18 @@ POST /map-wbs  — download WBS 업로드 → 원본 템플릿과 매핑 → 완
 
 import copy
 import io
+import json
 import os
 import shutil
 import tempfile
+from typing import List, Optional
 
+import anthropic
 import openpyxl
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from wbs_mapper import (
     COL_GUBUN,
@@ -38,9 +42,117 @@ app.add_middleware(
 )
 
 
+class MenuInfo(BaseModel):
+    name: str
+    phase: str = "1차"
+    pages: int = 1
+
+
+class ScheduleRequest(BaseModel):
+    project: str
+    client: str
+    start_date: str
+    first_launch_date: Optional[str] = None
+    end_date: str
+    multilingual: bool = False
+    conditions: Optional[str] = None
+    menus: List[MenuInfo] = []
+
+
+SCHEDULE_SYSTEM_PROMPT = """당신은 한국 웹 에이전시의 WBS 일정 전문가입니다.
+주어진 프로젝트 정보를 바탕으로 현실적이고 논리적인 WBS 일정을 JSON으로 생성합니다.
+
+## 담당 구분 (반드시 아래 셋 중 하나만 사용)
+- 더위버: 내부 단독 작업 (기획, 설계, 개발, 디자인)
+- 고객사: 클라이언트 단독 작업 (콘텐츠 제공, 자료 전달)
+- 더위버/고객사: 협업 필요 작업 (킥오프, 요구사항 정의, 검수, 최종 확인)
+
+## 업무 의존관계 (절대 어기지 말 것)
+- 착수(킥오프 → 요구사항 정의 → WBS 수립 → IA 설계)는 순차 진행
+- 화면설계는 IA 설계 완료 후 시작
+- 디자인은 화면설계 완료 후 시작
+- 개발은 디자인 완료 후 시작 (퍼블리싱 포함)
+- 검수/QA는 개발 완료 후 시작
+- 콘텐츠 수급(고객사 담당)은 착수 단계와 병행 가능
+- 같은 담당자가 동시에 두 업무를 진행하지 않도록 조정
+
+## 기간 산정 기준
+- 페이지 수, 복잡도, 다국어 여부를 반영하여 현실적으로 산정
+- 다국어 지원 시 개발/퍼블 기간 1.5배
+- 1차 오픈일이 있으면 1차 대상 메뉴를 우선 배치
+
+## 출력 형식
+JSON 배열만 출력하세요. 다른 텍스트 없이:
+[
+  {
+    "구분": "착수",
+    "업무": "기획",
+    "세부항목": "킥오프",
+    "담당": "더위버/고객사",
+    "시작일": "YYYY-MM-DD",
+    "종료일": "YYYY-MM-DD",
+    "기간": 1,
+    "계획": 0,
+    "진척": 0
+  }
+]"""
+
+
 @app.get("/")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/generate-schedule")
+async def generate_schedule(request: ScheduleRequest):
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.")
+
+    menu_lines = "\n".join(
+        f"  - {m.name}: {m.phase} 오픈, {m.pages}페이지"
+        for m in request.menus
+    )
+
+    user_message = f"""다음 웹 프로젝트의 WBS 일정을 생성해주세요.
+
+프로젝트명: {request.project}
+고객사: {request.client}
+시작일: {request.start_date}
+1차 오픈일: {request.first_launch_date or '없음'}
+종료일: {request.end_date}
+다국어 지원: {'예' if request.multilingual else '아니오'}
+기타 조건: {request.conditions or '없음'}
+
+메뉴 구성:
+{menu_lines}
+
+위 정보를 바탕으로 업무 의존관계를 지키는 현실적인 WBS 일정을 JSON으로 생성해주세요."""
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            system=SCHEDULE_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        raw = message.content[0].text.strip()
+
+        # JSON 블록 추출 (```json ... ``` 감싸진 경우 대비)
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+
+        tasks = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"Claude 응답 파싱 오류: {e}")
+    except anthropic.APIError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API 오류: {e}")
+
+    return {"tasks": tasks}
 
 
 @app.post("/map-wbs")
