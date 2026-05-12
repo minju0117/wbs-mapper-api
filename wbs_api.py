@@ -163,24 +163,10 @@ SCHEDULE_SYSTEM_PROMPT = """당신은 한국 웹 에이전시 "더위버"의 WBS
 - 1차 오픈일이 있으면 1차 메뉴를 먼저 배치하고 2차를 이후에 배치
 
 ## 출력 형식
-JSON 배열만 출력. 다른 텍스트 없이. 필드명은 반드시 아래 영문 camelCase 사용:
-[
-  {
-    "category": "착수",
-    "task": "기획",
-    "subTask": "킥오프",
-    "owner": "{고객사명}/더위버",
-    "startDate": "YYYY-MM-DD",
-    "endDate": "YYYY-MM-DD",
-    "duration": 1,
-    "scheduledProgress": 0,
-    "actualProgress": 0,
-    "progress": 0,
-    "locked": false,
-    "isCompleted": false,
-    "delayReason": ""
-  }
-]"""
+JSON 배열만 출력. 다른 텍스트 없이. 아래 7개 필드만 포함 (나머지는 시스템이 자동 처리):
+[{"category":"착수","task":"기획","subTask":"킥오프","owner":"{고객사명}/더위버","startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","duration":1}]
+
+공백 최소화하여 출력."""
 
 
 @app.get("/")
@@ -242,6 +228,16 @@ async def generate_schedule(request: ScheduleRequest):
             raw = raw[start:end + 1]
 
         tasks = json.loads(raw)
+
+        # 기본값 필드 자동 주입
+        for t in tasks:
+            t.setdefault("scheduledProgress", 0)
+            t.setdefault("actualProgress", 0)
+            t.setdefault("progress", 0)
+            t.setdefault("locked", False)
+            t.setdefault("isCompleted", False)
+            t.setdefault("delayReason", "")
+
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"Claude 응답 파싱 오류: {e}")
     except anthropic.APIError as e:
