@@ -193,7 +193,7 @@ async def generate_schedule(request: ScheduleRequest):
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=4096,
+            max_tokens=8096,
             system=SCHEDULE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_message}],
         )
