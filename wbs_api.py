@@ -222,7 +222,8 @@ async def generate_schedule(request: ScheduleRequest):
             t.setdefault("delayReason", "")
 
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"Claude 응답 파싱 오류: {e}")
+        preview = raw[:300] if 'raw' in dir() else "N/A"
+        raise HTTPException(status_code=500, detail=f"Claude 응답 파싱 오류: {e} | 응답 앞부분: {preview}")
     except anthropic.APIError as e:
         raise HTTPException(status_code=502, detail=f"Claude API 오류: {e}")
 
