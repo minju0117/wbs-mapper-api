@@ -224,12 +224,22 @@ async def generate_schedule(request: ScheduleRequest):
         )
         raw = message.content[0].text.strip()
 
-        # JSON 블록 추출 (```json ... ``` 감싸진 경우 대비)
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.strip()
+        # ``` 블록 제거
+        if "```" in raw:
+            parts = raw.split("```")
+            for part in parts:
+                part = part.strip()
+                if part.startswith("json"):
+                    part = part[4:].strip()
+                if part.startswith("["):
+                    raw = part
+                    break
+
+        # [ ... ] 배열 직접 추출 (앞뒤 설명 텍스트 제거)
+        start = raw.find("[")
+        end = raw.rfind("]")
+        if start != -1 and end != -1 and end > start:
+            raw = raw[start:end + 1]
 
         tasks = json.loads(raw)
     except json.JSONDecodeError as e:
