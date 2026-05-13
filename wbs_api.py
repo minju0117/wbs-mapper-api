@@ -207,7 +207,17 @@ async def adjust_schedule(request: AdjustRequest):
         raise HTTPException(status_code=400, detail="tasks 배열이 비어 있습니다.")
 
     locked_count = sum(1 for t in request.tasks if t.get("locked"))
-    tasks_json = json.dumps(request.tasks, ensure_ascii=False, separators=(",", ":"))
+
+    # Claude에게는 일정 관련 7개 필드 + locked만 전달 (토큰 절약)
+    KEEP_FIELDS = {"category", "task", "subTask", "owner", "startDate", "endDate", "duration", "locked"}
+    slim_tasks = [{k: v for k, v in t.items() if k in KEEP_FIELDS} for t in request.tasks]
+    tasks_json = json.dumps(slim_tasks, ensure_ascii=False, separators=(",", ":"))
+
+    # 원본 extra 필드 보존 (인덱스 기준)
+    extra_fields_by_index = [
+        {k: v for k, v in t.items() if k not in KEEP_FIELDS}
+        for t in request.tasks
+    ]
 
     user_message = f"""다음 WBS 일정을 조정해주세요.
 
@@ -252,7 +262,11 @@ locked=true 항목은 {locked_count}개입니다. 이 항목들을 기준점으�
 
         tasks = json.loads(raw)
 
-        for t in tasks:
+        # extra 필드 복원 + 기본값 설정
+        for i, t in enumerate(tasks):
+            if i < len(extra_fields_by_index):
+                for k, v in extra_fields_by_index[i].items():
+                    t.setdefault(k, v)
             t.setdefault("scheduledProgress", 0)
             t.setdefault("actualProgress", 0)
             t.setdefault("progress", 0)
