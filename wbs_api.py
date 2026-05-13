@@ -195,51 +195,32 @@ JSON 배열만 출력. 다른 텍스트 없이. 7개 필드만 포함:
 공백 최소화."""
 
 
-ADJUST_SYSTEM_PROMPT = """[출력 규칙] 반드시 JSON 배열([...])만 출력. 분석·설명·주석·코드블록 절대 금지. 첫 글자 [, 마지막 글자 ].
+ADJUST_SYSTEM_PROMPT = """[출력 규칙] JSON 배열만 출력. 설명·주석·코드블록 금지. 첫 글자 [, 마지막 글자 ]. 중간에 텍스트 삽입 절대 금지.
 
 당신은 한국 웹 에이전시 "더위버"의 WBS 일정 조정 전문가입니다.
 
-## 작업 절차
+아래 4가지 제약을 모두 동시에 만족하는 JSON 배열을 한 번에 출력한다.
 
-### STEP 1. locked=true 보존
-locked=true 태스크의 category/task/subTask/owner/startDate/endDate/duration 모두 변경 금지.
+[제약 A] locked=true 태스크: category/task/subTask/owner/startDate/endDate/duration 변경 금지.
 
-### STEP 2. 사용자 요청사항(conditions) 반영
-conditions에 명시된 내용을 반영하여 해당 태스크의 startDate/endDate/duration을 조정한다.
+[제약 B] 사용자 요청사항(conditions) 반영: conditions 내용을 최우선으로 반영하여 해당 태스크 날짜/기간 조정.
 
-### STEP 3. 오픈일 역산으로 전체 일정 재검토
-STEP 2 적용 결과가 오픈일을 초과하는지 반드시 검토한다.
-초과하면 다음 방법으로 오픈일 내에 맞춘다:
-- 각 퍼블리싱 태스크의 duration을 줄인다 (최솟값 2일)
-- 퍼블리싱을 앞당겨 배치한다 (단, 해당 메뉴 디자인 완료 후여야 함)
-- 빠듯하더라도 오픈일을 절대 넘기지 않는다
+[제약 C] 오픈일 초과 금지:
+- 모든 태스크 endDate ≤ end_date
+- first_launch_date 있으면 1차 관련 태스크 endDate ≤ first_launch_date
+- conditions 반영 후 오픈일 초과 시 → 퍼블리싱 duration을 최솟값(2일)까지 줄이고 앞당겨 오픈일 내 완료
+- 퍼블리싱은 오픈 당일 이후 배치 절대 금지
 
-오픈일 기준:
-- first_launch_date가 있으면: 1차 관련 태스크 전체 endDate ≤ first_launch_date
-- end_date: 모든 태스크 endDate ≤ end_date
-- 퍼블리싱은 오픈일 이전에 완료. 오픈 당일 이후 배치 금지.
+[제약 D] 검수 기간:
+- 퍼블리싱 검수(subTask에 "검수" 포함) endDate ≥ 해당 차수 마지막 페이지 퍼블리싱 endDate + 2영업일
+- 단, 오픈일(first_launch_date 또는 end_date)은 초과하지 않음
 
-의존관계 (전체 일정 재검토 시 준수):
-- 화면설계 → IA설계 완료 후
-- 페이지 디자인 → 해당 메뉴 화면설계 완료 후
-- 퍼블리싱 → 해당 메뉴 디자인 완료 후
-- 개발 → 퍼블리싱 검수 완료 후
-- 고객사 검수 → 기능검수 완료 후
-- 통합테스트 → 고객사 검수 완료 후
+의존관계 (제약 C 적용 시 준수):
+화면설계→IA설계 후 / 디자인→화면설계 후 / 퍼블리싱→디자인 후 / 개발→검수 후 / 고객사검수→기능검수 후 / 통합테스트→고객사검수 후
 
-### STEP 4. 검수 기간 보정
-퍼블리싱 검수 태스크(subTask에 "검수" 포함)의 endDate를 확인한다.
-해당 차수 마지막 페이지 퍼블리싱 endDate + 2영업일 미만이면 연장한다.
-단, 연장 후에도 오픈일(first_launch_date 또는 end_date)을 초과하면 안 된다.
+공통: 입력 tasks 외 추가·복원 금지. 태스크 수·순서 유지. 주말 제외. duration=영업일.
 
-### 공통 제약
-- 입력 tasks 배열에 없는 태스크 추가 금지. 삭제된 항목 복원 금지. 태스크 수·순서 유지.
-- 주말(토/일) 제외. duration은 영업일 기준.
-
-## 출력 형식
-입력 tasks 전체 반환. locked=true도 원본 그대로 포함.
-7개 필드: category, task, subTask, owner, startDate(YYYY-MM-DD), endDate(YYYY-MM-DD), duration
-JSON 배열만. 설명 없이. 공백 최소화. [로 시작 ]로 끝."""
+출력: 입력 tasks 전체(locked=true 포함). 7개 필드: category, task, subTask, owner, startDate(YYYY-MM-DD), endDate(YYYY-MM-DD), duration. JSON만. [시작 ]끝."""
 
 
 @app.get("/")
@@ -315,7 +296,29 @@ locked=true({locked_count}개)는 날짜/내용 변경 불가. locked=false는 �
         if start != -1 and end != -1 and end > start:
             raw = raw[start:end + 1]
 
-        tasks = json.loads(raw)
+        # 직접 파싱 시도
+        try:
+            tasks = json.loads(raw)
+        except json.JSONDecodeError:
+            # JSON 배열 안에 텍스트가 끼어든 경우: { ... } 블록만 추출
+            tasks = []
+            depth = 0
+            obj_start = None
+            for i, ch in enumerate(raw):
+                if ch == "{":
+                    if depth == 0:
+                        obj_start = i
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0 and obj_start is not None:
+                        try:
+                            tasks.append(json.loads(raw[obj_start:i + 1]))
+                        except json.JSONDecodeError:
+                            pass
+                        obj_start = None
+            if not tasks:
+                raise
 
         # extra 필드 복원 + 기본값 설정
         for i, t in enumerate(tasks):
@@ -389,13 +392,32 @@ async def generate_schedule(request: ScheduleRequest):
                     raw = part
                     break
 
-        # [ ... ] 배열 직접 추출 (앞뒤 설명 텍스트 제거)
         start = raw.find("[")
         end = raw.rfind("]")
         if start != -1 and end != -1 and end > start:
             raw = raw[start:end + 1]
 
-        tasks = json.loads(raw)
+        try:
+            tasks = json.loads(raw)
+        except json.JSONDecodeError:
+            tasks = []
+            depth = 0
+            obj_start = None
+            for i, ch in enumerate(raw):
+                if ch == "{":
+                    if depth == 0:
+                        obj_start = i
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0 and obj_start is not None:
+                        try:
+                            tasks.append(json.loads(raw[obj_start:i + 1]))
+                        except json.JSONDecodeError:
+                            pass
+                        obj_start = None
+            if not tasks:
+                raise
 
         # 기본값 필드 자동 주입
         for t in tasks:
