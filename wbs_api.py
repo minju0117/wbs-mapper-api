@@ -193,28 +193,30 @@ JSON 배열만 출력. 다른 텍스트 없이. 7개 필드만 포함:
 ADJUST_SYSTEM_PROMPT = """[출력 규칙] 반드시 JSON 배열([...])만 출력. 분석, 설명, 주석, 마크다운 코드블록 절대 금지. 첫 글자는 반드시 [, 마지막 글자는 반드시 ].
 
 당신은 한국 웹 에이전시 "더위버"의 WBS 일정 조정 전문가입니다.
-사용자가 직접 수정한 태스크(locked=true)를 기준점으로 삼아, 나머지 태스크(locked=false)의 일정을 재조정합니다.
 
-## 핵심 규칙
-1. locked=true 태스크: startDate/endDate/duration 절대 변경 금지. subTask/owner/category/task도 유지.
-2. locked=false 태스크: 의존관계를 지키며 startDate/endDate/duration 조정 가능.
-3. 업무 의존관계 (반드시 준수):
-   - 화면설계는 IA설계 완료 후에만 시작 가능
-   - 페이지 디자인은 해당 메뉴 화면설계 완료 후 시작
-   - 퍼블리싱은 해당 메뉴 디자인 완료 후 시작
-   - 개발은 퍼블리싱 완료 후 시작
-   - 고객사 검수는 기능검수 완료 후 시작
-   - 통합테스트는 고객사 검수 완료 후 시작
-4. locked 태스크가 의존관계를 깬 경우, 그 이후 태스크를 순차 밀어서 조정.
-5. locked 태스크가 의존관계상 앞 태스크를 당긴 경우, 앞 태스크도 당겨서 조정 가능.
-6. 주말(토/일) 제외. duration은 영업일 기준.
-7. 마감일 준수: 재조정 후 모든 태스크는 end_date를 절대 초과하지 않는다. first_launch_date가 있으면 1차 관련 태스크는 first_launch_date를 초과하지 않는다. 일정이 빠듯하면 duration을 최솟값으로 줄여서라도 마감일 준수.
-8. 퍼블리싱 태스크는 반드시 해당 오픈일 이전에 완료되어야 한다.
+## 조정 우선순위 (반드시 이 순서를 따른다)
+① locked=true 태스크 완전 보존
+② 사용자 요청사항(conditions) 최우선 반영
+③ 나머지 일정을 업무 의존관계에 맞게 조정
 
-## 담당 표기
-- 더위버 단독: "더위버"
-- 고객사 단독: "{입력된 고객사명}"
-- 협업: "{입력된 고객사명}/더위버"
+## 절대 규칙
+- 입력받은 tasks 배열에 없는 태스크는 절대 추가하지 않는다. 사용자가 삭제한 태스크는 복원하지 않는다.
+- 입력받은 tasks의 개수와 순서를 그대로 유지한다. 태스크 추가/삭제 금지.
+- locked=true 태스크: startDate/endDate/duration/subTask/owner/category/task 모두 변경 금지.
+- locked=false 태스크: conditions에 따라 또는 의존관계에 따라 startDate/endDate/duration만 조정 가능.
+- 모든 태스크의 endDate는 end_date를 절대 초과하지 않는다.
+- first_launch_date가 있으면 1차 관련 태스크는 first_launch_date를 절대 초과하지 않는다.
+- 퍼블리싱 태스크는 반드시 해당 오픈일 이전에 완료. 오픈일 이후까지 작업이 밀리면 안 된다.
+- 주말(토/일) 제외. duration은 영업일 기준.
+
+## 업무 의존관계 (③ 단계에서 적용)
+- 화면설계 → IA설계 완료 후
+- 페이지 디자인 → 해당 메뉴 화면설계 완료 후
+- 퍼블리싱 → 해당 메뉴 디자인 완료 후
+- 개발 → 퍼블리싱 완료 후
+- 고객사 검수 → 기능검수 완료 후
+- 통합테스트 → 고객사 검수 완료 후
+- locked 태스크로 인해 의존관계가 깨진 경우, 이후 태스크를 순차 밀어서 조정 (빠듯하면 duration 최솟값으로 단축)
 
 ## 출력 형식
 입력받은 tasks 배열 전체를 그대로 반환. locked=true 항목도 원본 그대로 포함.
@@ -249,21 +251,24 @@ async def adjust_schedule(request: AdjustRequest):
         for t in request.tasks
     ]
 
+    conditions_block = f"""
+## ★ 사용자 요청사항 (최우선 반영)
+{request.conditions}
+""" if request.conditions else ""
+
     user_message = f"""다음 WBS 일정을 조정해주세요.
 
 프로젝트명: {request.project}
 고객사: {request.client}
 시작일: {request.start_date}
-종료일: {request.end_date}
-1차 오픈일: {request.first_launch_date or '없음'}
-조정 지시사항: {request.conditions or '없음'}
-
-현재 tasks (locked=true는 수정 불가, locked=false는 조정 대상):
+종료일(절대 초과 금지): {request.end_date}
+1차 오픈일(절대 초과 금지): {request.first_launch_date or '없음'}
+{conditions_block}
+현재 tasks — 아래 배열이 전부다. 이 외의 태스크를 추가하거나 삭제된 항목을 복원하지 말 것.
+locked=true({locked_count}개)는 날짜/내용 변경 불가. locked=false는 조정 대상.
 {tasks_json}
 
-locked=true 항목은 {locked_count}개입니다. 이 항목들을 기준점으로 나머지 일정을 재조정해주세요.
-
-반드시 JSON 배열([...])만 출력. 분석이나 설명 없이 [ 로 시작하는 JSON만."""
+반드시 JSON 배열([...])만 출력. [ 로 시작하는 JSON만. 설명 없이."""
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
