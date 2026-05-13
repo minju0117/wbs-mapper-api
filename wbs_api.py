@@ -69,7 +69,9 @@ class AdjustRequest(BaseModel):
     tasks: List[dict] = []
 
 
-SCHEDULE_SYSTEM_PROMPT = """당신은 한국 웹 에이전시 "더위버"의 WBS 일정 전문가입니다.
+SCHEDULE_SYSTEM_PROMPT = """[출력 규칙] 반드시 JSON 배열([...])만 출력. 분석, 설명, 주석, 마크다운 코드블록 절대 금지. 첫 글자는 반드시 [, 마지막 글자는 반드시 ].
+
+당신은 한국 웹 에이전시 "더위버"의 WBS 일정 전문가입니다.
 6개 실제 프로젝트(DB그룹, DB하이텍, 효성그룹, 대상웰라이프, 삼양그룹, 삼화페인트)를 분석한 패턴 기반으로 일정을 생성합니다.
 
 ## 담당 표기
@@ -188,7 +190,9 @@ JSON 배열만 출력. 다른 텍스트 없이. 7개 필드만 포함:
 공백 최소화."""
 
 
-ADJUST_SYSTEM_PROMPT = """당신은 한국 웹 에이전시 "더위버"의 WBS 일정 조정 전문가입니다.
+ADJUST_SYSTEM_PROMPT = """[출력 규칙] 반드시 JSON 배열([...])만 출력. 분석, 설명, 주석, 마크다운 코드블록 절대 금지. 첫 글자는 반드시 [, 마지막 글자는 반드시 ].
+
+당신은 한국 웹 에이전시 "더위버"의 WBS 일정 조정 전문가입니다.
 사용자가 직접 수정한 태스크(locked=true)를 기준점으로 삼아, 나머지 태스크(locked=false)의 일정을 재조정합니다.
 
 ## 핵심 규칙
@@ -215,7 +219,7 @@ ADJUST_SYSTEM_PROMPT = """당신은 한국 웹 에이전시 "더위버"의 WBS �
 ## 출력 형식
 입력받은 tasks 배열 전체를 그대로 반환. locked=true 항목도 원본 그대로 포함.
 7개 필드만: category, task, subTask, owner, startDate(YYYY-MM-DD), endDate(YYYY-MM-DD), duration
-JSON 배열만 출력. 다른 텍스트 없이. 공백 최소화."""
+JSON 배열만 출력. 설명 없이. 공백 최소화. 반드시 [로 시작해서 ]로 끝낼 것."""
 
 
 @app.get("/")
@@ -257,7 +261,9 @@ async def adjust_schedule(request: AdjustRequest):
 현재 tasks (locked=true는 수정 불가, locked=false는 조정 대상):
 {tasks_json}
 
-locked=true 항목은 {locked_count}개입니다. 이 항목들을 기준점으로 나머지 일정을 재조정해주세요."""
+locked=true 항목은 {locked_count}개입니다. 이 항목들을 기준점으로 나머지 일정을 재조정해주세요.
+
+반드시 JSON 배열([...])만 출력. 분석이나 설명 없이 [ 로 시작하는 JSON만."""
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -333,7 +339,9 @@ async def generate_schedule(request: ScheduleRequest):
 메뉴 구성:
 {menu_lines}
 
-위 정보를 바탕으로 업무 의존관계를 지키는 현실적인 WBS 일정을 JSON으로 생성해주세요."""
+위 정보를 바탕으로 업무 의존관계를 지키는 현실적인 WBS 일정을 생성해주세요.
+
+반드시 JSON 배열([...])만 출력. 분석이나 설명 없이 [ 로 시작하는 JSON만."""
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
