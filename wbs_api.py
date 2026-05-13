@@ -231,10 +231,9 @@ locked=true 항목은 {locked_count}개입니다. 이 항목들을 기준점으�
             system=ADJUST_SYSTEM_PROMPT,
             messages=[
                 {"role": "user", "content": user_message},
-                {"role": "assistant", "content": "["},
             ],
         )
-        raw = "[" + message.content[0].text.strip()
+        raw = message.content[0].text.strip()
 
         if "```" in raw:
             parts = raw.split("```")
@@ -304,10 +303,9 @@ async def generate_schedule(request: ScheduleRequest):
             system=SCHEDULE_SYSTEM_PROMPT,
             messages=[
                 {"role": "user", "content": user_message},
-                {"role": "assistant", "content": "["},
             ],
         )
-        raw = "[" + message.content[0].text.strip()
+        raw = message.content[0].text.strip()
 
         # ``` 블록 제거
         if "```" in raw:
