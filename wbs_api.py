@@ -291,7 +291,9 @@ locked=true({locked_count}개)는 날짜/내용 변경 불가. locked=false는 �
                     raw = part
                     break
 
-        start = raw.find("[")
+        start = raw.find("[{")
+        if start == -1:
+            start = raw.find("[")
         end = raw.rfind("]")
         if start != -1 and end != -1 and end > start:
             raw = raw[start:end + 1]
@@ -392,7 +394,9 @@ async def generate_schedule(request: ScheduleRequest):
                     raw = part
                     break
 
-        start = raw.find("[")
+        start = raw.find("[{")
+        if start == -1:
+            start = raw.find("[")
         end = raw.rfind("]")
         if start != -1 and end != -1 and end > start:
             raw = raw[start:end + 1]
