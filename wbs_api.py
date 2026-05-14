@@ -398,23 +398,36 @@ async def generate_schedule(request: ScheduleRequest):
         )
         raw = message.content[0].text.strip()
 
-        # ``` 블록 제거
-        if "```" in raw:
-            parts = raw.split("```")
-            for part in parts:
-                part = part.strip()
-                if part.startswith("json"):
-                    part = part[4:].strip()
-                if part.startswith("["):
-                    raw = part
-                    break
+        def extract_json_gen(text: str) -> str:
+            if "```" in text:
+                for part in text.split("```"):
+                    part = part.strip()
+                    if part.startswith("json"):
+                        part = part[4:].strip()
+                    if part.startswith("[{"):
+                        return part
+            start = text.find("[{")
+            if start == -1:
+                start = text.find("[")
+            end = text.rfind("]")
+            if start != -1 and end != -1 and end > start:
+                return text[start:end + 1]
+            return text
 
-        start = raw.find("[{")
-        if start == -1:
-            start = raw.find("[")
-        end = raw.rfind("]")
-        if start != -1 and end != -1 and end > start:
-            raw = raw[start:end + 1]
+        raw = extract_json_gen(raw)
+
+        if not raw.strip().startswith("[{"):
+            retry = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=16000,
+                system=SCHEDULE_SYSTEM_PROMPT,
+                messages=[
+                    {"role": "user", "content": user_message},
+                    {"role": "assistant", "content": message.content[0].text},
+                    {"role": "user", "content": "지금 바로 JSON 배열만 출력. [{ 로 시작. 설명 없이."},
+                ],
+            )
+            raw = extract_json_gen(retry.content[0].text.strip())
 
         try:
             tasks = json.loads(raw)
