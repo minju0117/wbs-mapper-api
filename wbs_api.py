@@ -281,28 +281,43 @@ locked=true({locked_count}개)는 날짜/내용 변경 불가. locked=false는 �
         )
         raw = message.content[0].text.strip()
 
-        if "```" in raw:
-            parts = raw.split("```")
-            for part in parts:
-                part = part.strip()
-                if part.startswith("json"):
-                    part = part[4:].strip()
-                if part.startswith("["):
-                    raw = part
-                    break
+        def extract_json(text: str) -> str:
+            if "```" in text:
+                for part in text.split("```"):
+                    part = part.strip()
+                    if part.startswith("json"):
+                        part = part[4:].strip()
+                    if part.startswith("[{"):
+                        return part
+            start = text.find("[{")
+            if start == -1:
+                start = text.find("[")
+            end = text.rfind("]")
+            if start != -1 and end != -1 and end > start:
+                return text[start:end + 1]
+            return text
 
-        start = raw.find("[{")
-        if start == -1:
-            start = raw.find("[")
-        end = raw.rfind("]")
-        if start != -1 and end != -1 and end > start:
-            raw = raw[start:end + 1]
+        raw = extract_json(raw)
+
+        # JSON이 없으면 재시도: 추론 결과를 컨텍스트로 넘겨 JSON만 요청
+        if not raw.strip().startswith("[{"):
+            retry = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=16000,
+                system=ADJUST_SYSTEM_PROMPT,
+                messages=[
+                    {"role": "user", "content": user_message},
+                    {"role": "assistant", "content": message.content[0].text},
+                    {"role": "user", "content": "지금 바로 JSON 배열만 출력. [{ 로 시작. 설명 없이."},
+                ],
+            )
+            raw = extract_json(retry.content[0].text.strip())
 
         # 직접 파싱 시도
         try:
             tasks = json.loads(raw)
         except json.JSONDecodeError:
-            # JSON 배열 안에 텍스트가 끼어든 경우: { ... } 블록만 추출
+            # { ... } 블록만 추출
             tasks = []
             depth = 0
             obj_start = None
